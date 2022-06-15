@@ -33,43 +33,103 @@ resource "aws_ecr_lifecycle_policy" "repository_lifecycle_policy" {
 
 }
 
-resource "aws_iam_role" "codebuild_role" {
-  name = "${local.resource_prefix}-codebuild_deploy_role"
 
-  assume_role_policy = <<EOF
-{
-  "Version": "2012-10-17",
-  "Statement": [
-    {
-      "Effect": "Allow",
-      "Principal": {
-        "Service": "codebuild.amazonaws.com"
-      },
-      "Action": "sts:AssumeRole"
+resource "aws_codebuild_project" "codebuild_deployment" {
+  name           = "${local.resource_prefix}-CodeBuildProject"
+  description    = "Code build project for ${var.project_name}"
+  build_timeout  = "10"
+  service_role   = aws_iam_role.codebuild_role.arn
+  encryption_key = aws_kms_key.kms_key.key_id
+
+  artifacts {
+    type = "CODEPIPELINE"
+  }
+
+  cache {
+    type  = "LOCAL"
+    modes = ["LOCAL_DOCKER_LAYER_CACHE"]
+  }
+
+  environment {
+    image                       = var.codebuild_image
+    type                        = "LINUX_CONTAINER"
+    image_pull_credentials_type = "CODEBUILD"
+    privileged_mode             = var.cb_priviledged_mode
+    compute_type                = var.codebuild_node_size
+
+    environment_variable {
+      name  = "IMAGE_REPO_NAME"
+      value = aws_ecr_repository.container_repository.name
     }
-  ]
-}
-EOF
-}
+  }
 
-resource "aws_iam_role_policy" "codebuild_policy" {
-  name = "${local.resource_prefix}_codebuild_deployment_policy"
-  role = aws_iam_role.codebuild_role.name
+  logs_config {
+    cloudwatch_logs {
+      group_name = "/aws/codebuild/${var.project_name}"
+    }
 
-  policy = templatefile("${path.module}/templates/codebuild_policy.json.tpl",
-    {
-      cmk_arn             = aws_kms_key.kms_key.arn
-      artifact_bucket_arn = aws_s3_bucket.artifact_bucket.arn
-      ecr_arn             = aws_ecr_repository.container_repository.arn
-      partition           = data.aws_partition.current.partition
-      region              = local.region
-      account_id          = local.account_id
-      project_name        = var.project_name
+  }
 
+  source {
+    type      = "CODEPIPELINE"
+    buildspec = "buildspec.yml"
+  }
 
-  })
 }
 
-# rCodeBuildProject
 
-# rPipeline
+resource "aws_codestarconnections_connection" "bitbucket" {
+  name          = "bitbucket-connection"
+  provider_type = "Bitbucket"
+}
+
+resource "aws_codepipeline" "example" {
+  name     = "${local.resource_prefix}-pipeline"
+  role_arn = aws_iam_role.codepipeline_role.arn
+
+  artifact_store {
+    location = aws_s3_bucket.artifact_bucket.bucket
+    type     = "S3"
+
+    encryption_key {
+      id   = aws_kms_key.kms_key.arn
+      type = "KMS"
+    }
+  }
+
+  stage {
+    name = "Source"
+    action {
+      name             = "Source"
+      category         = "Source"
+      owner            = "AWS"
+      provider         = "CodeStarSourceConnection"
+      version          = "1"
+      output_artifacts = ["source_output"]
+
+      configuration = {
+        ConnectionArn    = aws_codestarconnections_connection.bitbucket.arn
+        FullRepositoryId = var.bitbucket_repo_full_name
+        BranchName       = var.repo_branch_name
+      }
+    }
+  }
+  stage {
+    name = "Build"
+
+    action {
+      name             = "Build-${aws_codebuild_project.codebuild_deployment.name}"
+      category         = "Build"
+      owner            = "AWS"
+      provider         = "CodeBuild"
+      version          = "1"
+      run_order        = 1
+      input_artifacts  = ["source_output"]
+      output_artifacts = ["build_output"]
+
+      configuration = {
+        ProjectName = aws_codebuild_project.codebuild_deployment.name
+      }
+    }
+  }
+}

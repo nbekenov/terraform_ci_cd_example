@@ -7,6 +7,7 @@
         "s3:GetObject*",
         "s3:GetBucket*",
         "s3:PutObject",
+        "s3:PutObjectAcl",
         "s3:List*",
         "s3:Abort*"
       ],
@@ -35,7 +36,8 @@
         "ecr:InitiateLayerUpload",
         "ecr:UploadLayerPart",
         "ecr:CompleteLayerUpload",
-        "ecr:Describe*"
+        "ecr:Describe*",
+        "ecr:PutImage"
       ],
       "Resource": "${ecr_arn}"
     },
@@ -60,9 +62,10 @@
       "Action": [
         "logs:CreateLogGroup",
         "logs:CreateLogStream",
-        "logs:PutLogEvents"
+        "logs:PutLogEvents",
+        "logs:DescribeLogStreams"
       ],
-      "Resource": "arn:${partition}:codebuild:${region}:${account_id}:log-group:/aws/codebuild/${project_name}*"
+      "Resource": "arn:${partition}:logs:${region}:${account_id}:log-group:/aws/codebuild/${project_name}*"
     }
   ]
 }
