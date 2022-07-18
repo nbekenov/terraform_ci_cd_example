@@ -1,0 +1,35 @@
+version: 0.2
+env:
+  variables:
+    AWS_DEFAULT_REGION: "us-east-1"
+phases:
+  install:
+    runtime-versions:
+      python: 3.x
+    commands:
+      - echo Entered the INSTAL phase
+      - yum update -y
+      - yum install jq git -y -q
+      - echo Configuring aws cli...
+      - pip3 install awsebcli --upgrade
+      - pip install --upgrade awscli
+      - aws configure set default.region us-east-1
+  pre_build:
+    commands:
+      - AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query 'Account' --output text)
+      - REPOSITORY_URI=$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com/${IMAGE_REPO_NAME}
+      - echo Logging in to Amazon ECR... 
+      - $(aws ecr get-login --registry-ids $AWS_ACCOUNT_ID --no-include-email --region $AWS_DEFAULT_REGION)
+      - COMMIT_HASH=$(echo $CODEBUILD_RESOLVED_SOURCE_VERSION | cut -c 1-7)
+      - IMAGE_TAG=${COMMIT_HASH:=latest}
+  build:
+    commands:
+      - echo Build started on `date`
+      - echo Building the Docker image..
+      - docker build -t $REPOSITORY_URI:latest .
+      - docker tag $REPOSITORY_URI:latest $REPOSITORY_URI:$IMAGE_TAG
+  post_build:
+    commands:
+      - echo Build completed on `date`
+      - echo Pushing the Docker image...
+      - docker push $REPOSITORY_URI:$IMAGE_TAG
